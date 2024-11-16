@@ -7,11 +7,12 @@
     "jsonwebtoken": "^9.0.2",
     "path": "^0.12.7",
     "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.7"
+    "sqlite3": "^5.1.7",
+    "vercel": "^39.0.2"
   },
   "engines": {
-  "pnpm": "6.x"
-},
+    "pnpm": "6.x"
+  },
   "devDependencies": {
     "nodemon": "^3.1.7"
   },

@@ -1,4 +1,4 @@
-const express = require('express');
+\const express = require('express');
 const crypto = require('crypto');
 const { open } = require('sqlite');
 const cors = require('cors');
@@ -19,25 +19,30 @@ app.use(cors({
 }));
 
 const createTables = async () => {
-    await db.exec(`
-        CREATE TABLE IF NOT EXISTS userDetails (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username VARCHAR(255) NOT NULL,
-            email VARCHAR(255) NOT NULL,
-            password VARCHAR(255) NOT NULL
-        )
-    `);
+    try {
+        await db.exec(`
+            CREATE TABLE IF NOT EXISTS userDetails (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username VARCHAR(255) NOT NULL UNIQUE,
+                email VARCHAR(255) NOT NULL UNIQUE,
+                password VARCHAR(255) NOT NULL
+            )
+        `);
 
-    await db.exec(`
-        CREATE TABLE IF NOT EXISTS todo (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            task TEXT NOT NULL,
-            status VARCHAR(255) NOT NULL,
-            userId VARCHAR(225) NOT NULL
-        )
-    `);
+        await db.exec(`
+            CREATE TABLE IF NOT EXISTS todo (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task TEXT NOT NULL,
+                status VARCHAR(255) NOT NULL,
+                userId INTEGER NOT NULL
+            )
+        `);
 
-    console.log('Tables created successfully');
+        console.log('Tables created successfully');
+    } catch (error) {
+        console.error('Error creating tables:', error);
+        throw new Error('Database initialization failed');
+    }
 };
 
 const initializeDbAndServer = async () => {
@@ -51,7 +56,7 @@ const initializeDbAndServer = async () => {
 
         app.listen(4000, () => console.log('Server is running on: http://localhost:4000'));
     } catch (e) {
-        console.log(`DB Error: ${e.message}`);
+        console.error(`DB Error: ${e.message}`);
         process.exit(1);
     }
 };
@@ -74,8 +79,17 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
+// Helper function to validate required fields
+const validateFields = (fields) => {
+    return fields.every(field => field !== undefined && field !== null && field !== '');
+};
+
+// Routes
 app.post('/', async (req, res) => {
     const { name, password } = req.body;
+    if (!validateFields([name, password])) {
+        return res.status(400).json({ error: 'Invalid request: Missing username or password' });
+    }
     try {
         const query = `SELECT * FROM userDetails WHERE username = ?`;
         const user = await db.get(query, [name]);
@@ -84,7 +98,7 @@ app.post('/', async (req, res) => {
             const token = jwt.sign({ username: user.username }, jwtSecret, { expiresIn: '1h' });
             res.status(200).json({ message: 'Successfully logged in', token });
         } else {
-            res.status(401).send({ error: 'Invalid username or password.' });
+            res.status(401).json({ error: 'Invalid username or password' });
         }
     } catch (error) {
         console.error('Error during login:', error);
@@ -94,97 +108,62 @@ app.post('/', async (req, res) => {
 
 app.post('/register', async (req, res) => {
     const { username, email, password } = req.body;
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const selectUserQuery = `SELECT username FROM userDetails WHERE username = ?`;
-    const dbUser = await db.get(selectUserQuery, [username]);
+    if (!validateFields([username, email, password])) {
+        return res.status(400).json({ error: 'Invalid request: Missing username, email, or password' });
+    }
+    try {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const selectUserQuery = `SELECT username FROM userDetails WHERE username = ? OR email = ?`;
+        const dbUser = await db.get(selectUserQuery, [username, email]);
 
-    if (dbUser === undefined) {
-        try {
-            const newRegisterQuery = `INSERT INTO userDetails(username,email,password) VALUES (?,?,?)`;
-            const result = await db.run(newRegisterQuery, [username, email, hashedPassword]);
+        if (!dbUser) {
+            const newRegisterQuery = `INSERT INTO userDetails(username, email, password) VALUES (?, ?, ?)`;
+            await db.run(newRegisterQuery, [username, email, hashedPassword]);
             res.status(200).json({ message: 'New user registered successfully' });
-        } catch (err) {
-            res.status(400).json({ message: err.message });
+        } else {
+            res.status(400).json({ error: 'User already exists' });
         }
-    } else {
-        res.status(400).send({ message: 'User already exists' });
+    } catch (error) {
+        console.error('Error during registration:', error);
+        res.status(500).json({ error: 'Failed to register user' });
     }
 });
 
 app.get('/userDetails', async (req, res) => {
     try {
         const allUsersQuery = `SELECT * FROM userDetails`;
-        const result = await db.all(allUsersQuery);
-        res.status(200).send(result);
-    } catch (err) {
-        res.status(400).json({ message: err.message });
-    }
-});
-
-app.delete('/delete', async (req, res) => {
-    try {
-        const deleteQuery = `DELETE FROM userDetails`;
-        await db.run(deleteQuery);
-        res.status(200).json({ message: "Successfully deleted data" });
-    } catch (err) {
-        res.status(400).json({ message: err.message });
+        const users = await db.all(allUsersQuery);
+        res.status(200).json(users);
+    } catch (error) {
+        console.error('Error fetching user details:', error);
+        res.status(500).json({ error: 'Failed to fetch user details' });
     }
 });
 
 app.post('/todoPost/:user', authenticateToken, async (req, res) => {
+    const user = req.params.user;
+    const { task, status } = req.body;
+    if (!validateFields([task, status])) {
+        return res.status(400).json({ error: 'Invalid request: Missing task or status' });
+    }
     try {
-        const user = req.params.user;
-        const { task, status } = req.body;
         const addTodoQuery = `INSERT INTO todo (task, status, userId) VALUES(?, ?, ?)`;
         const result = await db.run(addTodoQuery, [task, status, user]);
-        res.status(200).json({ message: 'Todo added successfully', todo: result });
-    } catch (err) {
-        res.status(400).json({ message: err.message });
+        res.status(200).json({ message: 'Todo added successfully', id: result.lastID });
+    } catch (error) {
+        console.error('Error adding todo:', error);
+        res.status(500).json({ error: 'Failed to add todo' });
     }
 });
 
 app.get('/todoList/:userId', authenticateToken, async (req, res) => {
+    const userId = req.params.userId;
     try {
-        const userId = req.params.userId;
         const getTodoListQuery = `SELECT * FROM todo WHERE userId = ?`;
-        const result = await db.all(getTodoListQuery, [userId]);
-        res.status(200).json({ list: result });
-    } catch (err) {
-        res.status(400).json({ message: err.message });
-    }
-});
-
-app.get('/todoList', authenticateToken, async (req, res) => {
-    try {
-        const getTodoListQuery = `SELECT * FROM todo`;
-        const result = await db.all(getTodoListQuery);
-        res.status(200).json({ list: result });
-    } catch (err) {
-        res.status(400).json({ message: err.message });
-    }
-});
-
-app.put('/updateTodo/:id', authenticateToken, async (req, res) => {
-    const id = req.params.id;
-    const { task, status } = req.body;
-    try {
-        const updateTodoQuery = `UPDATE todo SET task = ?, status = ? WHERE id = ?`;
-        await db.run(updateTodoQuery, [task, status, id]);
-        res.status(200).json({ message: 'Todo updated successfully' });
+        const todos = await db.all(getTodoListQuery, [userId]);
+        res.status(200).json(todos);
     } catch (error) {
-        console.error('Error updating todo:', error);
-        res.status(500).json({ error: 'Failed to update todo' });
-    }
-});
-
-app.delete('/deleteTodo/:id', authenticateToken, async (req, res) => {
-    const id = req.params.id;
-    try {
-        const deleteTodoQuery = 'DELETE FROM todo WHERE id = ?';
-        await db.run(deleteTodoQuery, [id]);
-        res.status(200).json({ message: 'Todo deleted successfully' });
-    } catch (error) {
-        console.error('Error deleting todo:', error);
-        res.status(500).json({ error: 'Failed to delete todo' });
+        console.error('Error fetching todo list:', error);
+        res.status(500).json({ error: 'Failed to fetch todo list' });
     }
 });
