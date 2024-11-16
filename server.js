@@ -5,7 +5,7 @@ const cors = require('cors');
 const sqlite3 = require('sqlite3');
 const path = require('path');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt')
+const bcrypt = require('bcrypt');
 
 let db = null;
 const databasePath = path.join(__dirname, 'user.db');
@@ -35,8 +35,8 @@ const createTables = async () => {
             status VARCHAR(255) NOT NULL,
             userId VARCHAR(225) NOT NULL
         )
-        `);
-    
+    `);
+
     console.log('Tables created successfully');
 };
 
@@ -58,8 +58,24 @@ const initializeDbAndServer = async () => {
 
 initializeDbAndServer();
 
+// JWT Authentication Middleware
+const authenticateToken = (req, res, next) => {
+    const token = req.headers['authorization'];
+    if (!token) {
+        return res.status(401).json({ error: 'No token provided' });
+    }
+
+    jwt.verify(token, jwtSecret, (err, user) => {
+        if (err) {
+            return res.status(403).json({ error: 'Invalid or expired token' });
+        }
+        req.user = user;
+        next();
+    });
+};
+
 app.post('/', async (req, res) => {
-    const { name, password } = req.body; 
+    const { name, password } = req.body;
     try {
         const query = `SELECT * FROM userDetails WHERE username = ?`;
         const user = await db.get(query, [name]);
@@ -68,7 +84,7 @@ app.post('/', async (req, res) => {
             const token = jwt.sign({ username: user.username }, jwtSecret, { expiresIn: '1h' });
             res.status(200).json({ message: 'Successfully logged in', token });
         } else {
-            res.status(401).send({ error: 'Invalid username or password..' });
+            res.status(401).send({ error: 'Invalid username or password.' });
         }
     } catch (error) {
         console.error('Error during login:', error);
@@ -76,95 +92,81 @@ app.post('/', async (req, res) => {
     }
 });
 
-
-//middleware function to verify jwtToken
-
-/* const authenticateToken = (req, res, next) => {
-    const token = req.headers['authorization'];
-    console.log(token)
-}; */
-
-
-
 app.post('/register', async (req, res) => {
-    const {username,email} = req.body;
-    const hashedPassword = await bcrypt.hash(req.body.password,10) 
-    const selectUserQuery = `SELECT username FROM userDetails WHERE username = ?`
-    const dbUser = await db.get(selectUserQuery, [username])
+    const { username, email, password } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const selectUserQuery = `SELECT username FROM userDetails WHERE username = ?`;
+    const dbUser = await db.get(selectUserQuery, [username]);
 
-    if(dbUser === undefined){
-        try{
+    if (dbUser === undefined) {
+        try {
             const newRegisterQuery = `INSERT INTO userDetails(username,email,password) VALUES (?,?,?)`;
-            const result = await db.run(newRegisterQuery,[username,email,hashedPassword])
-            res.status(200).json({message: 'new user registered successfully'})
-        }catch(err){
-            res.status(400).json({message: err.message});
+            const result = await db.run(newRegisterQuery, [username, email, hashedPassword]);
+            res.status(200).json({ message: 'New user registered successfully' });
+        } catch (err) {
+            res.status(400).json({ message: err.message });
         }
-    }else{
-        res.status(400).send({message:'user is Already existed'});
+    } else {
+        res.status(400).send({ message: 'User already exists' });
     }
-    
-})
+});
 
-app.get('/userDetails',async(req,res) => {
-    try{
-        const allUsersQuery = `SELECT * FROM userdetails`;
+app.get('/userDetails', async (req, res) => {
+    try {
+        const allUsersQuery = `SELECT * FROM userDetails`;
         const result = await db.all(allUsersQuery);
         res.status(200).send(result);
-    }catch(err){
-        res.status(400).json({message: err.message});
+    } catch (err) {
+        res.status(400).json({ message: err.message });
     }
-})
+});
 
-app.delete('/delete', async (req,res) => {
-    try{
-        const deleteQuery = `DELETE FROM userDetails`
-        const result = await db.run(deleteQuery);
-        res.status(200).json({result: "successfull delete data"}); 
-    }catch(err){
-        res.status(400).json({message: err.message});
-    }
-})
-
-app.post('/todoPost/:user', async (req, res) => {
-    try{
-        const user = req.params.user;
-        const {task,status} = req.body
-        const addTodoQuery = `INSERT INTO todo (task,status,userId) VALUES(?,?,?)`
-        const result = await db.run(addTodoQuery, [task, status, user])
-        res.status(200).json({message: result}); 
-    }catch(err) {
-        res.status(400).json({message: err.message});
-    }
-
-})
-
-app.get('/todoList/:userId', async (req, res) => {
+app.delete('/delete', async (req, res) => {
     try {
-        const userId = (req.params.userId).replace(":","");
+        const deleteQuery = `DELETE FROM userDetails`;
+        await db.run(deleteQuery);
+        res.status(200).json({ message: "Successfully deleted data" });
+    } catch (err) {
+        res.status(400).json({ message: err.message });
+    }
+});
+
+app.post('/todoPost/:user', authenticateToken, async (req, res) => {
+    try {
+        const user = req.params.user;
+        const { task, status } = req.body;
+        const addTodoQuery = `INSERT INTO todo (task, status, userId) VALUES(?, ?, ?)`;
+        const result = await db.run(addTodoQuery, [task, status, user]);
+        res.status(200).json({ message: 'Todo added successfully', todo: result });
+    } catch (err) {
+        res.status(400).json({ message: err.message });
+    }
+});
+
+app.get('/todoList/:userId', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.params.userId;
         const getTodoListQuery = `SELECT * FROM todo WHERE userId = ?`;
-        const result = await db.all(getTodoListQuery, [userId]); 
+        const result = await db.all(getTodoListQuery, [userId]);
         res.status(200).json({ list: result });
     } catch (err) {
         res.status(400).json({ message: err.message });
     }
 });
 
-
-
-app.get('/todoList', async (req, res) => {
-    try{
-        const getTodoListQuery = `SELECT * FROM todo`
-        const result = await db.all(getTodoListQuery)
-        res.status(200).json({list: result}); 
-    }catch(err) {
-        res.status(400).json({message: err.message});
+app.get('/todoList', authenticateToken, async (req, res) => {
+    try {
+        const getTodoListQuery = `SELECT * FROM todo`;
+        const result = await db.all(getTodoListQuery);
+        res.status(200).json({ list: result });
+    } catch (err) {
+        res.status(400).json({ message: err.message });
     }
-})
+});
 
-app.put('/updateTodo/:id', async (req, res) => {
+app.put('/updateTodo/:id', authenticateToken, async (req, res) => {
     const id = req.params.id;
-    const { task, status } = req.body; 
+    const { task, status } = req.body;
     try {
         const updateTodoQuery = `UPDATE todo SET task = ?, status = ? WHERE id = ?`;
         await db.run(updateTodoQuery, [task, status, id]);
@@ -175,7 +177,7 @@ app.put('/updateTodo/:id', async (req, res) => {
     }
 });
 
-app.delete('/deleteTodo/:id', async (req, res) => {
+app.delete('/deleteTodo/:id', authenticateToken, async (req, res) => {
     const id = req.params.id;
     try {
         const deleteTodoQuery = 'DELETE FROM todo WHERE id = ?';
@@ -186,4 +188,3 @@ app.delete('/deleteTodo/:id', async (req, res) => {
         res.status(500).json({ error: 'Failed to delete todo' });
     }
 });
-
