@@ -1,4 +1,4 @@
-\const express = require('express');
+const express = require('express');
 const crypto = require('crypto');
 const { open } = require('sqlite');
 const cors = require('cors');
@@ -53,7 +53,6 @@ const initializeDbAndServer = async () => {
         });
 
         await createTables();
-
         app.listen(4000, () => console.log('Server is running on: http://localhost:4000'));
     } catch (e) {
         console.error(`DB Error: ${e.message}`);
