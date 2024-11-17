@@ -93,6 +93,8 @@ app.post('/', async (req, res) => {
         const query = `SELECT * FROM userDetails WHERE username = ?`;
         const user = await db.get(query, [name]);
 
+        res.json('helo world')
+
         if (user && await bcrypt.compare(password, user.password)) {
             const token = jwt.sign({ username: user.username }, jwtSecret, { expiresIn: '1h' });
             res.status(200).json({ message: 'Successfully logged in', token });
