@@ -84,7 +84,7 @@ const validateFields = (fields) => {
 };
 
 // Routes
-app.post('/', async (req, res) => {
+app.post('/login', async (req, res) => {
     const { name, password } = req.body;
     if (!validateFields([name, password])) {
         return res.status(400).json({ error: 'Invalid request: Missing username or password' });
@@ -92,18 +92,17 @@ app.post('/', async (req, res) => {
     try {
         const query = `SELECT * FROM userDetails WHERE username = ?`;
         const user = await db.get(query, [name]);
-
-        res.json('helo world')
+        console.log('User fetched:', user);
 
         if (user && await bcrypt.compare(password, user.password)) {
             const token = jwt.sign({ username: user.username }, jwtSecret, { expiresIn: '1h' });
-            res.status(200).json({ message: 'Successfully logged in', token });
+            res.status(200).json({ message: 'Login successful', token });
         } else {
             res.status(401).json({ error: 'Invalid username or password' });
         }
     } catch (error) {
-        console.error('Error during login:', error);
-        res.status(500).json({ error: 'Failed to authenticate user' });
+        console.error('Login error:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
     }
 });
 
