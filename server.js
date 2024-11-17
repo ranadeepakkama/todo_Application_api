@@ -1,6 +1,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { open } = require('sqlite');
+require('dotenv').config();
 const cors = require('cors');
 const sqlite3 = require('sqlite3');
 const path = require('path');
@@ -10,6 +11,7 @@ const bcrypt = require('bcrypt');
 let db = null;
 const databasePath = path.join(__dirname, 'user.db');
 const jwtSecret = crypto.randomBytes(64).toString('hex');
+
 
 const app = express();
 app.use(express.json());
