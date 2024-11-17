@@ -9,16 +9,12 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 
 let db = null;
-const databasePath = path.join(__dirname, 'user.db');
-const jwtSecret = crypto.randomBytes(64).toString('hex');
-
+const databasePath = process.env.DATABASE_PATH || path.join(__dirname, 'user.db');
+const jwtSecret = process.env.JWT_SECRET || 'fallback_secret';
 
 const app = express();
 app.use(express.json());
-
-app.use(cors({
-    origin: 'http://localhost:3000',
-}));
+app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:3000' }));
 
 const createTables = async () => {
     try {
@@ -30,7 +26,6 @@ const createTables = async () => {
                 password VARCHAR(255) NOT NULL
             )
         `);
-
         await db.exec(`
             CREATE TABLE IF NOT EXISTS todo (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,13 +34,25 @@ const createTables = async () => {
                 userId INTEGER NOT NULL
             )
         `);
-
         console.log('Tables created successfully');
     } catch (error) {
         console.error('Error creating tables:', error);
         throw new Error('Database initialization failed');
     }
 };
+
+(async () => {
+    try {
+        db = await open({ filename: databasePath, driver: sqlite3.Database });
+        await createTables();
+    } catch (error) {
+        console.error('Failed to initialize the server:', error);
+    }
+})();
+
+app.get('/', (req, res) => {
+    res.json({ message: 'Welcome to the API' });
+});
 
 const initializeDbAndServer = async () => {
     try {
@@ -63,22 +70,6 @@ const initializeDbAndServer = async () => {
 };
 
 initializeDbAndServer();
-
-// JWT Authentication Middleware
-const authenticateToken = (req, res, next) => {
-    const token = req.headers['authorization'];
-    if (!token) {
-        return res.status(401).json({ error: 'No token provided' });
-    }
-
-    jwt.verify(token, jwtSecret, (err, user) => {
-        if (err) {
-            return res.status(403).json({ error: 'Invalid or expired token' });
-        }
-        req.user = user;
-        next();
-    });
-};
 
 // Helper function to validate required fields
 const validateFields = (fields) => {
@@ -111,6 +102,23 @@ app.post('/login', async (req, res) => {
 app.get('/', (req,res) => {
     res.json({message:"your in login page"})
 })
+
+
+// JWT Authentication Middleware
+const authenticateToken = (req, res, next) => {
+    const token = req.headers['authorization'];
+    if (!token) {
+        return res.status(401).json({ error: 'No token provided' });
+    }
+
+    jwt.verify(token, jwtSecret, (err, user) => {
+        if (err) {
+            return res.status(403).json({ error: 'Invalid or expired token' });
+        }
+        req.user = user;
+        next();
+    });
+};
 
 app.post('/register', async (req, res) => {
     const { username, email, password } = req.body;
@@ -174,6 +182,6 @@ app.get('/todoList/:userId', authenticateToken, async (req, res) => {
     }
 });
 
-
+module.exports = app;
 
 /* updated node js version to 18 in verce */
