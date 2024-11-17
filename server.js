@@ -1,38 +1,39 @@
 const express = require('express');
 const crypto = require('crypto');
-const { open } = require('sqlite');
 require('dotenv').config();
 const cors = require('cors');
-const sqlite3 = require('sqlite3');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
+const Database = require('better-sqlite3');
 
-let db = null;
+// Database initialization
 const databasePath = process.env.DATABASE_PATH || path.join(__dirname, 'user.db');
 const jwtSecret = process.env.JWT_SECRET || 'fallback_secret';
+const db = new Database(databasePath, { verbose: console.log });
 
 const app = express();
 app.use(express.json());
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:3000' }));
 
-const createTables = async () => {
+// Create tables
+const createTables = () => {
     try {
-        await db.exec(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS userDetails (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username VARCHAR(255) NOT NULL UNIQUE,
                 email VARCHAR(255) NOT NULL UNIQUE,
                 password VARCHAR(255) NOT NULL
-            )
+            );
         `);
-        await db.exec(`
+        db.exec(`
             CREATE TABLE IF NOT EXISTS todo (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 task TEXT NOT NULL,
                 status VARCHAR(255) NOT NULL,
                 userId INTEGER NOT NULL
-            )
+            );
         `);
         console.log('Tables created successfully');
     } catch (error) {
@@ -41,35 +42,9 @@ const createTables = async () => {
     }
 };
 
-(async () => {
-    try {
-        db = await open({ filename: databasePath, driver: sqlite3.Database });
-        await createTables();
-    } catch (error) {
-        console.error('Failed to initialize the server:', error);
-    }
-})();
-
-app.get('/', (req, res) => {
-    res.json({ message: 'Welcome to the API' });
-});
-
-const initializeDbAndServer = async () => {
-    try {
-        db = await open({
-            filename: databasePath,
-            driver: sqlite3.Database,
-        });
-
-        await createTables();
-        app.listen(4000, () => console.log('Server is running on: http://localhost:4000'));
-    } catch (e) {
-        console.error(`DB Error: ${e.message}`);
-        process.exit(1);
-    }
-};
-
-initializeDbAndServer();
+// Initialize database and server
+createTables();
+app.listen(4000, () => console.log('Server is running on: http://localhost:4000'));
 
 // Helper function to validate required fields
 const validateFields = (fields) => {
@@ -77,32 +52,9 @@ const validateFields = (fields) => {
 };
 
 // Routes
-app.post('/login', async (req, res) => {
-    const { name, password } = req.body;
-    if (!validateFields([name, password])) {
-        return res.status(400).json({ error: 'Invalid request: Missing username or password' });
-    }
-    try {
-        const query = `SELECT * FROM userDetails WHERE username = ?`;
-        const user = await db.get(query, [name]);
-        console.log('User fetched:', user);
-
-        if (user && await bcrypt.compare(password, user.password)) {
-            const token = jwt.sign({ username: user.username }, jwtSecret, { expiresIn: '1h' });
-            res.status(200).json({ message: 'Login successful', token });
-        } else {
-            res.status(401).json({ error: 'Invalid username or password' });
-        }
-    } catch (error) {
-        console.error('Login error:', error);
-        res.status(500).json({ error: 'Internal Server Error' });
-    }
+app.get('/', (req, res) => {
+    res.json({ message: 'Welcome to the API' });
 });
-
-app.get('/', (req,res) => {
-    res.json({message:"your in login page"})
-})
-
 
 // JWT Authentication Middleware
 const authenticateToken = (req, res, next) => {
@@ -120,19 +72,20 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
-app.post('/register', async (req, res) => {
+// User Registration
+app.post('/register', (req, res) => {
     const { username, email, password } = req.body;
     if (!validateFields([username, email, password])) {
         return res.status(400).json({ error: 'Invalid request: Missing username, email, or password' });
     }
     try {
-        const hashedPassword = await bcrypt.hash(password, 10);
+        const hashedPassword = bcrypt.hashSync(password, 10);
         const selectUserQuery = `SELECT username FROM userDetails WHERE username = ? OR email = ?`;
-        const dbUser = await db.get(selectUserQuery, [username, email]);
+        const dbUser = db.prepare(selectUserQuery).get(username, email);
 
         if (!dbUser) {
             const newRegisterQuery = `INSERT INTO userDetails(username, email, password) VALUES (?, ?, ?)`;
-            await db.run(newRegisterQuery, [username, email, hashedPassword]);
+            db.prepare(newRegisterQuery).run(username, email, hashedPassword);
             res.status(200).json({ message: 'New user registered successfully' });
         } else {
             res.status(400).json({ error: 'User already exists' });
@@ -143,10 +96,34 @@ app.post('/register', async (req, res) => {
     }
 });
 
-app.get('/userDetails', async (req, res) => {
+// User Login
+app.post('/login', (req, res) => {
+    const { name, password } = req.body;
+    if (!validateFields([name, password])) {
+        return res.status(400).json({ error: 'Invalid request: Missing username or password' });
+    }
+    try {
+        const query = `SELECT * FROM userDetails WHERE username = ?`;
+        const user = db.prepare(query).get(name);
+        console.log('User fetched:', user);
+
+        if (user && bcrypt.compareSync(password, user.password)) {
+            const token = jwt.sign({ username: user.username }, jwtSecret, { expiresIn: '1h' });
+            res.status(200).json({ message: 'Login successful', token });
+        } else {
+            res.status(401).json({ error: 'Invalid username or password' });
+        }
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+// Fetch User Details
+app.get('/userDetails', (req, res) => {
     try {
         const allUsersQuery = `SELECT * FROM userDetails`;
-        const users = await db.all(allUsersQuery);
+        const users = db.prepare(allUsersQuery).all();
         res.status(200).json(users);
     } catch (error) {
         console.error('Error fetching user details:', error);
@@ -154,7 +131,8 @@ app.get('/userDetails', async (req, res) => {
     }
 });
 
-app.post('/todoPost/:user', authenticateToken, async (req, res) => {
+// Add Todo
+app.post('/todoPost/:user', authenticateToken, (req, res) => {
     const user = req.params.user;
     const { task, status } = req.body;
     if (!validateFields([task, status])) {
@@ -162,19 +140,20 @@ app.post('/todoPost/:user', authenticateToken, async (req, res) => {
     }
     try {
         const addTodoQuery = `INSERT INTO todo (task, status, userId) VALUES(?, ?, ?)`;
-        const result = await db.run(addTodoQuery, [task, status, user]);
-        res.status(200).json({ message: 'Todo added successfully', id: result.lastID });
+        const result = db.prepare(addTodoQuery).run(task, status, user);
+        res.status(200).json({ message: 'Todo added successfully', id: result.lastInsertRowid });
     } catch (error) {
         console.error('Error adding todo:', error);
         res.status(500).json({ error: 'Failed to add todo' });
     }
 });
 
-app.get('/todoList/:userId', authenticateToken, async (req, res) => {
+// Fetch Todo List
+app.get('/todoList/:userId', authenticateToken, (req, res) => {
     const userId = req.params.userId;
     try {
         const getTodoListQuery = `SELECT * FROM todo WHERE userId = ?`;
-        const todos = await db.all(getTodoListQuery, [userId]);
+        const todos = db.prepare(getTodoListQuery).all(userId);
         res.status(200).json(todos);
     } catch (error) {
         console.error('Error fetching todo list:', error);
@@ -183,5 +162,3 @@ app.get('/todoList/:userId', authenticateToken, async (req, res) => {
 });
 
 module.exports = app;
-
-/* updated node js version to 18 in verce */
