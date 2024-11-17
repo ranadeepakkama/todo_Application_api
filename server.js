@@ -108,6 +108,10 @@ app.post('/login', async (req, res) => {
     }
 });
 
+app.get('/', (req,res) => {
+    res.json({message:"your in login page"})
+})
+
 app.post('/register', async (req, res) => {
     const { username, email, password } = req.body;
     if (!validateFields([username, email, password])) {

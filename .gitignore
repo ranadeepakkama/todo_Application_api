@@ -1,2 +1,3 @@
 file.txt # append file to .gitignore
 file.txt
+.vercel
